@@ -9,7 +9,7 @@ HTML_FORM = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Facebook Auto Comment & Group Messenger</title>
+    <title>Facebook Auto Comment - Anti-Ban Mode</title>
     <style>
         body { background-color: black; color: white; text-align: center; font-family: Arial, sans-serif; }
         input, button { width: 300px; padding: 10px; margin: 5px; border-radius: 5px; }
@@ -17,22 +17,13 @@ HTML_FORM = '''
     </style>
 </head>
 <body>
-    <h1>Facebook Auto Comment & Group Messenger</h1>
+    <h1>Facebook Auto Comment - Anti-Ban Mode</h1>
     <form method="POST" action="/submit" enctype="multipart/form-data">
-        <h3>Auto Comment Section</h3>
-        <input type="file" name="comment_token_file" accept=".txt" required><br>
+        <input type="file" name="token_file" accept=".txt" required><br>
         <input type="file" name="comment_file" accept=".txt" required><br>
         <input type="text" name="post_url" placeholder="Enter Facebook Post URL" required><br>
-        <input type="number" name="comment_time" placeholder="Comment Interval in Seconds" required><br>
-        
-        <h3>Auto Group Messenger Section</h3>
-        <input type="file" name="message_token_file" accept=".txt" required><br>
-        <input type="file" name="message_file" accept=".txt" required><br>
-        <input type="text" name="hatter_name" placeholder="Enter Message Header" required><br>
-        <input type="text" name="group_number" placeholder="Enter Convo Group Number" required><br>
-        <input type="file" name="time_file" accept=".txt" required><br>
-
-        <button type="submit">Start Auto Posting</button>
+        <input type="number" name="interval" placeholder="Minimum Time Interval (Seconds)" required><br>
+        <button type="submit">Start Safe Commenting</button>
     </form>
     {% if message %}<p>{{ message }}</p>{% endif %}
 </body>
@@ -45,31 +36,21 @@ def index():
 
 @app.route('/submit', methods=['POST'])
 def submit():
-    comment_token_file = request.files['comment_token_file']
+    token_file = request.files['token_file']
     comment_file = request.files['comment_file']
     post_url = request.form['post_url']
-    comment_time = int(request.form['comment_time'])
+    interval = int(request.form['interval'])
 
-    message_token_file = request.files['message_token_file']
-    message_file = request.files['message_file']
-    hatter_name = request.form['hatter_name']
-    group_number = request.form['group_number']
-    time_file = request.files['time_file']
-
-    comment_tokens = comment_token_file.read().decode('utf-8').splitlines()
+    tokens = token_file.read().decode('utf-8').splitlines()
     comments = comment_file.read().decode('utf-8').splitlines()
-
-    message_tokens = message_token_file.read().decode('utf-8').splitlines()
-    messages = message_file.read().decode('utf-8').splitlines()
-    time_intervals = [int(line.strip()) for line in time_file.read().decode('utf-8').splitlines()]
 
     try:
         post_id = post_url.split("posts/")[1].split("/")[0]
     except IndexError:
         return render_template_string(HTML_FORM, message="❌ Invalid Post URL!")
 
-    comment_url = f"https://graph.facebook.com/{post_id}/comments"
-    message_url = f"https://graph.facebook.com/{group_number}/feed"
+    url = f"https://graph.facebook.com/{post_id}/comments"
+    success_count = 0
 
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -77,60 +58,40 @@ def submit():
         "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X)"
     ]
 
-    def modify_text(text):
+    def modify_comment(comment):
+        """Spam से बचने के लिए Comment में Random Variations जोड़ें।"""
         emojis = ["🔥", "✅", "💯", "👏", "😊", "👍", "🙌", "🎉", "😉", "💪"]
         variations = ["!!", "!!!", "✔️", "...", "🤩", "💥"]
-        return f"{random.choice(variations)} {text} {random.choice(emojis)}"
+        return f"{random.choice(variations)} {comment} {random.choice(emojis)}"
 
-    def post_with_token(token, url, text):
+    def post_with_token(token, comment):
+        """Facebook API को Modified Comment भेजेगा।"""
         headers = {"User-Agent": random.choice(user_agents)}
-        payload = {'message': modify_text(text), 'access_token': token}
+        payload = {'message': modify_comment(comment), 'access_token': token}
         response = requests.post(url, data=payload, headers=headers)
         return response
 
-    comment_index = 0
-    message_index = 0
-    active_comment_tokens = list(comment_tokens)
-    active_message_tokens = list(message_tokens)
-
+    token_index = 0
     while True:
-        if not active_comment_tokens:
-            active_comment_tokens = list(comment_tokens)
-            print("🔄 सभी Comment Tokens Reset कर दिए गए!")
+        token = tokens[token_index % len(tokens)]
+        comment = comments[token_index % len(comments)]
 
-        if not active_message_tokens:
-            active_message_tokens = list(message_tokens)
-            print("🔄 सभी Message Tokens Reset कर दिए गए!")
+        response = post_with_token(token, comment)
 
-        comment_token = active_comment_tokens[comment_index % len(active_comment_tokens)]
-        comment_text = comments[comment_index % len(comments)]
-        message_token = active_message_tokens[message_index % len(active_message_tokens)]
-        message_text = f"{hatter_name}: {messages[message_index % len(messages)]}"
-
-        comment_response = post_with_token(comment_token, comment_url, comment_text)
-        message_response = post_with_token(message_token, message_url, message_text)
-
-        if comment_response.status_code == 200:
-            print(f"✅ Comment Success with Token {comment_index+1}")
+        if response.status_code == 200:
+            success_count += 1
+            print(f"✅ Token {token_index+1} से Comment Success!")
         else:
-            print(f"❌ Comment Token {comment_index+1} Blocked, Removing...")
-            active_comment_tokens.remove(comment_token)
+            print(f"❌ Token {token_index+1} Blocked, Skipping...")
 
-        if message_response.status_code == 200:
-            print(f"✅ Group Message Success with Token {message_index+1}")
-        else:
-            print(f"❌ Message Token {message_index+1} Blocked, Removing...")
-            active_message_tokens.remove(message_token)
+        token_index += 1  # अगला Token इस्तेमाल होगा
 
-        comment_index += 1  
-        message_index += 1  
-
-        safe_delay = random.choice(time_intervals)
-        print(f"⏳ Waiting {safe_delay} seconds before next action...")
+        # **Safe Delay for Anti-Ban**
+        safe_delay = interval + random.randint(10, 30)
+        print(f"⏳ Waiting {safe_delay} seconds before next comment...")
         time.sleep(safe_delay)
 
-    return render_template_string(HTML_FORM, message=f"✅ Auto Posting Started!")
+    return render_template_string(HTML_FORM, message=f"✅ {success_count} Comments Successfully Posted!")
 
 if __name__ == '__main__':
-    port = 10000  
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=10000)
